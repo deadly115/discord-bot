@@ -18,12 +18,16 @@ client = discord.Client(intents=intents)
 async def post_update(post):
     channel = client.get_channel(CHANNEL_ID)
 
-    # Build the title for the embed
+    # Build the title and URL for the embed
     title = post['title']['rendered']
     url = post['link']
     
-    # Create an embed message with the title only
-    embed = discord.Embed(title=title, url=url)
+    # Remove special characters and everything after the chapter number
+    formatted_title = re.sub(r'[^a-zA-Z0-9\s]', '', title.split('–')[0]).strip()
+    formatted_title = re.sub(r'\s+', ' ', formatted_title)  # Replace multiple spaces with a single space
+
+    # Create an embed message
+    embed = discord.Embed(title=formatted_title, url=url)
     
     # Check for featured media (cover image)
     media_url = None
@@ -46,7 +50,8 @@ async def post_update(post):
     if media_url:
         embed.set_image(url=media_url)
 
-    # Send the embed to the channel
+    # Send the ping and the embed to the channel
+    await channel.send(f"@All series @{formatted_title} {url}")  # Pinging roles
     await channel.send(embed=embed)
 
 @client.event
@@ -75,3 +80,4 @@ async def check_for_updates():
         await asyncio.sleep(60)  # Check for updates every minute
 
 client.run(TOKEN)
+
