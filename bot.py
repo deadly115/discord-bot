@@ -51,7 +51,7 @@ async def post_update(post):
         embed.set_image(url=media_url)
 
     # Send the ping and the embed to the channel
-    await channel.send(f"@All series @{formatted_title} {url}")  # Pinging roles
+    await channel.send(f":mega: @All series @{formatted_title}")  # Pinging roles
     await channel.send(embed=embed)
 
 @client.event
