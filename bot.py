@@ -18,12 +18,12 @@ client = discord.Client(intents=intents)
 async def post_update(post):
     channel = client.get_channel(CHANNEL_ID)
 
-    # Build the title and description for the embed
+    # Build the title for the embed
     title = post['title']['rendered']
     url = post['link']
     
-    # Create an embed message
-    embed = discord.Embed(title=title, description="New Manga Chapter Update", url=url)
+    # Create an embed message with the title only
+    embed = discord.Embed(title=title, url=url)
     
     # Check for featured media (cover image)
     media_url = None
