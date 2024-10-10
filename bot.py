@@ -5,6 +5,7 @@ import asyncio
 import re
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
 
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -15,39 +16,28 @@ ALL_SERIES_ROLE_ID = 878685403266306130  # 'All series' role ID
 
 # Create intents
 intents = discord.Intents.default()
-intents.guilds = True
-intents.members = True
 client = discord.Client(intents=intents)
-
-# Function to clean and format title for role matching
-def clean_title_for_role(title):
-    # Remove everything after the last hyphen and replace special characters with spaces
-    formatted_title = re.sub(r'[^a-zA-Z0-9\s]', '', title.split('–')[-1]).strip()
-    formatted_title = re.sub(r'\s+', ' ', formatted_title)  # Replace multiple spaces with a single space
-    return formatted_title
-
-# Function to find the closest matching role
-def find_closest_role(guild, formatted_title):
-    max_match = 0
-    closest_role = None
-    title_words = set(formatted_title.lower().split())
-
-    for role in guild.roles:
-        role_words = set(role.name.lower().split())
-        match_count = len(title_words & role_words)  # Count matching words
-        if match_count > max_match:
-            max_match = match_count
-            closest_role = role
-
-    return closest_role
 
 async def post_update(post):
     title = post['title']['rendered']
     url = post['link']
 
-    # Create the embed message
-    embed = discord.Embed(title=title, url=url)
+    # Extract and format the title for role mention
+    formatted_title = re.sub(r'[^a-zA-Z0-9\s]', '', title.split('–')[-1]).strip()
+    formatted_title = re.sub(r'\s+', ' ', formatted_title)  # Replace multiple spaces with a single space
+    
+    # Get channel references
+    channel_1 = client.get_channel(CHANNEL_ID_1)
+    channel_2 = client.get_channel(CHANNEL_ID_2)
+    
+    # Ensure the channels exist
+    if channel_1 is None or channel_2 is None:
+        print("Error: One or both channels not found.")
+        return
 
+    # Build the embed
+    embed = discord.Embed(title=title, url=url)
+    
     # Check for featured media (cover image)
     media_url = None
     if 'featured_media' in post and post['featured_media'] > 0:
@@ -56,7 +46,7 @@ async def post_update(post):
             media = media_response.json()
             media_url = media['source_url']
     else:
-        # If no featured image, extract the image from the content
+        # Extract the first image from the content if no featured media
         content_rendered = post['content']['rendered']
         match = re.search(r'<img[^>]+src="([^">]+)"', content_rendered)
         if match:
@@ -64,32 +54,22 @@ async def post_update(post):
         else:
             print(f"No image found in content for post ID {post['id']}")
 
+    # Set image URL in embed if available
     if media_url:
         embed.set_image(url=media_url)
 
-    # Get both channels
-    channel_1 = client.get_channel(CHANNEL_ID_1)
-    channel_2 = client.get_channel(CHANNEL_ID_2)
-
-    # Get the current guild from the channel
-    guild = channel_1.guild
-
-    # Find the closest role based on title
-    formatted_title = clean_title_for_role(title)
-    closest_role = find_closest_role(guild, formatted_title)
-
-    # Ensure we have a matching role to mention, otherwise skip mentioning
-    if closest_role:
-        ping_message = f":mega: <@&{ALL_SERIES_ROLE_ID}> <@&{closest_role.id}>"
-    else:
-        ping_message = f":mega: <@&{ALL_SERIES_ROLE_ID}>"
-
-    # Send the ping and the embed to both channels
-    await channel_1.send(ping_message)
-    await channel_1.send(embed=embed)
-
-    await channel_2.send(ping_message)
-    await channel_2.send(embed=embed)
+    # Attempt to send the message to both channels
+    try:
+        await channel_1.send(f"<@&{ALL_SERIES_ROLE_ID}> @{formatted_title}", embed=embed)
+        print(f"Message sent to Channel 1 (ID: {CHANNEL_ID_1})")
+    except Exception as e:
+        print(f"Error sending message to Channel 1: {e}")
+    
+    try:
+        await channel_2.send(f"<@&{ALL_SERIES_ROLE_ID}> @{formatted_title}", embed=embed)
+        print(f"Message sent to Channel 2 (ID: {CHANNEL_ID_2})")
+    except Exception as e:
+        print(f"Error sending message to Channel 2: {e}")
 
 @client.event
 async def on_ready():
@@ -107,12 +87,13 @@ async def check_for_updates():
                 if last_post_id is None or latest_post['id'] > last_post_id:
                     await post_update(latest_post)  # Send update for the latest post
                     last_post_id = latest_post['id']  # Update the last posted ID
-                    print(f"Posted ID: {last_post_id}")
+                    print(f"Posted ID: {last_post_id}")  # Log the posted ID for debugging
             else:
                 print("No posts found.")
         else:
             print(f"Failed to fetch posts: {response.status_code}")
-
+        
         await asyncio.sleep(60)  # Check for updates every minute
 
+# Run the bot
 client.run(TOKEN)
