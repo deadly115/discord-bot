@@ -48,12 +48,12 @@ async def post_update(post, guild):
     # Find the role by the best match
     role = find_best_role_match(guild, formatted_title)
 
-    # Create the embed message
+    # Create the embed message with a glittery border effect
     embed = discord.Embed(
         title=title,
         url=url,
         description="Check out the latest update!",
-        color=discord.Color.blurple()  # You can choose any color here
+        color=0xFFD700  # Gold color to simulate glitter
     )
     
     # Check for featured media (cover image)
