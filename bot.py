@@ -8,107 +8,107 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TOKEN = os.getenv('DISCORD_TOKEN')
-CHANNEL_ID_1 = 1293682301821259898  # First Discord channel ID
-CHANNEL_ID_2 = 854986887370244116   # Second Discord channel ID
+CHANNEL_IDS = [1293682301821259898, 854986887370244116]  # List of channels to send updates to
 URL_TO_CHECK = 'https://agscomics.com/wp-json/wp/v2/posts'  # WordPress REST API URL
 
 # Create intents
 intents = discord.Intents.default()
+intents.guilds = True  # To access guild (server) info and roles
 client = discord.Client(intents=intents)
 
-async def post_update(post):
-    try:
-        # Get both channels by their IDs
-        channel_1 = client.get_channel(CHANNEL_ID_1)
-        channel_2 = client.get_channel(CHANNEL_ID_2)
+# Helper function to find the best matching role by name based on word similarity
+def find_best_role_match(guild, formatted_title):
+    formatted_words = set(formatted_title.lower().split())
 
-        if channel_1 is None or channel_2 is None:
-            print("One or both channels could not be found.")
-            return
-        
-        # Get the title and URL for the embed
-        title = post['title']['rendered']
-        url = post['link']
-        
-        # Format the title for the role mention (but keep the original title for the embed)
-        if '–' in title:
-            formatted_title = title.rsplit('–', 1)[0].strip()  # Remove everything after the last '–'
-        elif '-' in title:
-            formatted_title = title.rsplit('-', 1)[0].strip()  # Remove everything after the last '-'
+    best_match = None
+    highest_match_count = 0
+
+    for role in guild.roles:
+        role_words = set(role.name.lower().split())
+        common_words = formatted_words.intersection(role_words)
+        match_count = len(common_words)
+
+        if match_count > highest_match_count:
+            highest_match_count = match_count
+            best_match = role
+
+    return best_match
+
+async def post_update(post, guild):
+    title = post['title']['rendered']
+    url = post['link']
+    
+    # Remove special characters and everything after the last hyphen for the role mention
+    formatted_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.rsplit('–', 1)[0]).strip()
+    formatted_title = re.sub(r'\s+', ' ', formatted_title)  # Replace multiple spaces with a single space
+
+    # Find the role by the best match
+    role = find_best_role_match(guild, formatted_title)
+    
+    # Create the embed message
+    embed = discord.Embed(title=title, url=url)
+    
+    # Check for featured media (cover image)
+    media_url = None
+    if 'featured_media' in post and post['featured_media'] > 0:
+        media_response = requests.get(f'https://agscomics.com/wp-json/wp/v2/media/{post["featured_media"]}')
+        if media_response.status_code == 200:
+            media = media_response.json()
+            media_url = media['source_url']
+    else:
+        # If no featured image, extract the image from the content
+        content_rendered = post['content']['rendered']
+        # Use a regex to find the first image in the content
+        match = re.search(r'<img[^>]+src="([^">]+)"', content_rendered)
+        if match:
+            media_url = match.group(1)
         else:
-            formatted_title = title.strip()
+            print(f"No image found in content for post ID {post['id']}")
 
-        # Replace special characters in the formatted title for the role mention
-        formatted_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', formatted_title)
-        formatted_title = re.sub(r'\s+', ' ', formatted_title).strip()  # Replace multiple spaces with a single space
+    # Set the image URL in the embed if available
+    if media_url:
+        embed.set_image(url=media_url)
 
-        # Create an embed message with the original title
-        embed = discord.Embed(title=title, url=url)
-        
-        # Check for featured media (cover image)
-        media_url = None
-        if 'featured_media' in post and post['featured_media'] > 0:
-            media_response = requests.get(f'https://agscomics.com/wp-json/wp/v2/media/{post["featured_media"]}')
-            if media_response.status_code == 200:
-                media = media_response.json()
-                media_url = media['source_url']
-        else:
-            # If no featured image, extract the image from the content
-            content_rendered = post['content']['rendered']
-            # Use a regex to find the first image in the content
-            match = re.search(r'<img[^>]+src="([^">]+)"', content_rendered)
-            if match:
-                media_url = match.group(1)
+    # Send the ping and the embed to all channels
+    for channel_id in CHANNEL_IDS:
+        channel = client.get_channel(channel_id)
+        if channel:
+            if role:
+                await channel.send(f":mega: <@&{role.id}> @All series")  # Mention the dynamic role and @All series
             else:
-                print(f"No image found in content for post ID {post['id']}")
-
-        # Set the image URL in the embed if available
-        if media_url:
-            embed.set_image(url=media_url)
-
-        # Send the ping and the embed to both channels
-        message = f":mega: @All series @{formatted_title}"  # Pinging roles
-
-        # Try sending to both channels
-        await channel_1.send(message)
-        await channel_1.send(embed=embed)
-
-        await channel_2.send(message)
-        await channel_2.send(embed=embed)
-
-    except Exception as e:
-        print(f"Error in post_update: {e}")
+                await channel.send(f":mega: @All series")  # If no role is found, just @All series
+            await channel.send(embed=embed)
+        else:
+            print(f"Channel {channel_id} not found or not accessible.")
 
 @client.event
 async def on_ready():
     print(f'Logged in as {client.user}')
-    await check_for_updates()
+    guild = discord.utils.get(client.guilds)  # Assuming the bot is in one guild
+    await check_for_updates(guild)
 
-async def check_for_updates():
+async def check_for_updates(guild):
     last_post_id = None  # Variable to keep track of the last posted ID
     while True:
-        try:
-            response = requests.get(URL_TO_CHECK)
-            if response.status_code == 200:
-                posts = response.json()
-                if posts:
-                    # Sort posts by ID to ensure we get the latest
-                    latest_post = max(posts, key=lambda post: post['id'])
-                    if last_post_id is None or latest_post['id'] > last_post_id:
-                        await post_update(latest_post)  # Send update for the latest post
-                        last_post_id = latest_post['id']  # Update the last posted ID
-                        print(f"Posted ID: {last_post_id}")  # Log the posted ID for debugging
-                else:
-                    print("No posts found.")
+        response = requests.get(URL_TO_CHECK)
+        if response.status_code == 200:
+            posts = response.json()
+            if posts:
+                # Sort posts by ID to ensure we get the latest
+                latest_post = max(posts, key=lambda post: post['id'])
+                if last_post_id is None or latest_post['id'] > last_post_id:
+                    await post_update(latest_post, guild)  # Send update for the latest post
+                    last_post_id = latest_post['id']  # Update the last posted ID
+                    print(f"Posted ID: {last_post_id}")  # Log the posted ID for debugging
             else:
-                print(f"Failed to fetch posts: {response.status_code}")
-        
-        except Exception as e:
-            print(f"Error in check_for_updates: {e}")
+                print("No posts found.")
+        else:
+            print(f"Failed to fetch posts: {response.status_code}")
         
         await asyncio.sleep(60)  # Check for updates every minute
 
 client.run(TOKEN)
+
 
 
 
