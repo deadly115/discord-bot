@@ -18,16 +18,24 @@ client = discord.Client(intents=intents)
 async def post_update(post):
     channel = client.get_channel(CHANNEL_ID)
 
-    # Build the title and URL for the embed
+    # Get the title and URL for the embed
     title = post['title']['rendered']
     url = post['link']
     
-    # Remove special characters and everything after the chapter number
-    formatted_title = re.sub(r'[^a-zA-Z0-9\s]', '', title.split('–')[0]).strip()
-    formatted_title = re.sub(r'\s+', ' ', formatted_title)  # Replace multiple spaces with a single space
+    # Format the title for the role mention (but keep the original title for the embed)
+    if '–' in title:
+        formatted_title = title.rsplit('–', 1)[0].strip()  # Remove everything after the last '–'
+    elif '-' in title:
+        formatted_title = title.rsplit('-', 1)[0].strip()  # Remove everything after the last '-'
+    else:
+        formatted_title = title.strip()
 
-    # Create an embed message
-    embed = discord.Embed(title=formatted_title, url=url)
+    # Replace special characters in the formatted title for the role mention
+    formatted_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', formatted_title)
+    formatted_title = re.sub(r'\s+', ' ', formatted_title).strip()  # Replace multiple spaces with a single space
+
+    # Create an embed message with the original title
+    embed = discord.Embed(title=title, url=url)
     
     # Check for featured media (cover image)
     media_url = None
@@ -50,7 +58,7 @@ async def post_update(post):
     if media_url:
         embed.set_image(url=media_url)
 
-    # Send the ping and the embed to the channel
+    # Send the ping with both roles (@All series and the formatted title as a role mention)
     await channel.send(f":mega: @All series @{formatted_title}")  # Pinging roles
     await channel.send(embed=embed)
 
@@ -80,4 +88,5 @@ async def check_for_updates():
         await asyncio.sleep(60)  # Check for updates every minute
 
 client.run(TOKEN)
+
 
