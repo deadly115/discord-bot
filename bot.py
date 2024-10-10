@@ -1,4 +1,43 @@
+import discord
+import os
+import requests
+import asyncio
+import re  # For regular expression operations
+from dotenv import load_dotenv
+
+load_dotenv()
+
+TOKEN = os.getenv('DISCORD_TOKEN')
+CHANNEL_IDS = [1293682301821259898, 854986887370244116]  # List of channels to send updates to
+URL_TO_CHECK = 'https://agscomics.com/wp-json/wp/v2/posts'  # WordPress REST API URL
+
+# Create intents
+intents = discord.Intents.default()
+intents.guilds = True  # To access guild (server) info and roles
+client = discord.Client(intents=intents)
+
+ALL_SERIES_ROLE_ID = 878685403266306130  # 'All series' role ID
+
+# Helper function to find the best matching role by name based on word similarity
+def find_best_role_match(guild, formatted_title):
+    formatted_words = set(formatted_title.lower().split())
+
+    best_match = None
+    highest_match_count = 0
+
+    for role in guild.roles:
+        role_words = set(role.name.lower().split())
+        common_words = formatted_words.intersection(role_words)
+        match_count = len(common_words)
+
+        if match_count > highest_match_count:
+            highest_match_count = match_count
+            best_match = role
+
+    return best_match
+
 async def post_update(post, guild):
+    print(f"Received post update: {post}")  # Debugging line
     title = post['title']['rendered']
     url = post['link']
     
@@ -8,7 +47,7 @@ async def post_update(post, guild):
 
     # Find the role by the best match
     role = find_best_role_match(guild, formatted_title)
-    
+
     # Create the embed message
     embed = discord.Embed(
         title=title,
@@ -38,9 +77,7 @@ async def post_update(post, guild):
     if media_url:
         embed.set_image(url=media_url)
 
-    # Add author and footer information
-    embed.set_author(name="AGS Updates", icon_url="https://example.com/icon.png")  # Replace with your icon URL
-    embed.set_footer(text="Stay updated with AGS Comics!", icon_url="https://example.com/footer-icon.png")  # Replace with your footer icon URL
+    print(f"Sending update to channels: {CHANNEL_IDS}")  # Debugging line
 
     # Send the ping and the embed to all channels
     for channel_id in CHANNEL_IDS:
@@ -52,5 +89,36 @@ async def post_update(post, guild):
                 await channel.send(f":mega: <@&{ALL_SERIES_ROLE_ID}>")  # If no role is found, just @All series
             
             await channel.send(embed=embed)
+            print(f"Message sent to channel: {channel_id}")  # Debugging line
         else:
             print(f"Channel {channel_id} not found or not accessible.")
+
+@client.event
+async def on_ready():
+    print(f'Logged in as {client.user}')
+    guild = discord.utils.get(client.guilds)  # Assuming the bot is in one guild
+    await check_for_updates(guild)
+
+async def check_for_updates(guild):
+    last_post_id = None  # Variable to keep track of the last posted ID
+    while True:
+        response = requests.get(URL_TO_CHECK)
+        print(f"Checking for updates: {response.status_code}")  # Debugging line
+        if response.status_code == 200:
+            posts = response.json()
+            print(f"Posts retrieved: {posts}")  # Debugging line
+            if posts:
+                # Sort posts by ID to ensure we get the latest
+                latest_post = max(posts, key=lambda post: post['id'])
+                if last_post_id is None or latest_post['id'] > last_post_id:
+                    await post_update(latest_post, guild)  # Send update for the latest post
+                    last_post_id = latest_post['id']  # Update the last posted ID
+                    print(f"Posted ID: {last_post_id}")  # Log the posted ID for debugging
+            else:
+                print("No posts found.")
+        else:
+            print(f"Failed to fetch posts: {response.status_code}")
+        
+        await asyncio.sleep(60)  # Check for updates every minute
+
+client.run(TOKEN)
